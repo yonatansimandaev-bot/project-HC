@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Dashboard</title>
+</head>
+<body>
+<h1>Admin Dashboard</h1>
+<table border="1">
+    <tr>
+        <th>Username</th>
+        <th>Status</th>
+        <th>Last Seen</th>
+        <th>Location</th>
+    </tr>
+    {% for user in users %}
+    <tr>
+        <td>{{ user[0] }}</td>
+        <td>{{ user[1] }}</td>
+        <td>{{ user[2] }}</td>
+        <td>{{ user[3] }}, {{ user[4] }}</td>
+    </tr>
+    {% endfor %}
+</table>
+</body>
+</html>
