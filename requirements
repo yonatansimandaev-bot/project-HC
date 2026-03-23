@@ -1,0 +1,2 @@
+Flask==2.3.2
+(You can add sqlite3 if your environment doesn’t include it; most Python installations do.)
