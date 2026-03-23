@@ -1,0 +1,114 @@
+# app.py
+from flask import Flask, render_template, request
+import sqlite3
+from datetime import datetime
+
+app = Flask(__name__)
+DB = 'system.db'
+
+# --- Initialize database ---
+def init_db():
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    # Users
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password_hash TEXT,
+        ip TEXT,
+        location_lat REAL,
+        location_lon REAL,
+        wpm REAL,
+        last_seen_time TEXT,
+        last_timezone TEXT,
+        status TEXT DEFAULT 'ok'
+    )""")
+    # Logs
+    c.execute("""CREATE TABLE IF NOT EXISTS user_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
+        password_hash TEXT,
+        action_taken TEXT,
+        reason TEXT,
+        last_seen_lat REAL,
+        last_seen_lon REAL,
+        timestamp TEXT
+    )""")
+    # System Settings
+    c.execute("""CREATE TABLE IF NOT EXISTS system_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wpm_instant_ban REAL,
+        wpm_conditional REAL,
+        instant_travel REAL,
+        different_location REAL
+    )""")
+    conn.commit()
+    conn.close()
+
+# --- User evaluation ---
+def evaluate_user(user):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT * FROM system_settings ORDER BY id DESC LIMIT 1")
+    settings = c.fetchone()
+    if not settings:
+        wpm_instant_ban, wpm_conditional, instant_travel, different_location = 200, 150, 3500, 10000
+    else:
+        wpm_instant_ban, wpm_conditional, instant_travel, different_location = settings[1], settings[2], settings[3], settings[4]
+
+    action = 'ok'
+    reason = 'none'
+    if user['wpm'] >= wpm_instant_ban or user.get('instant_travel',0) >= instant_travel:
+        action = 'banned'
+        reason = 'instant ban'
+    elif user.get('failed_attempts',0) > 7:
+        action = 'blocked_20h'
+        reason = 'failed passwords'
+    else:
+        conditions = 0
+        if user['wpm'] > wpm_conditional:
+            conditions += 1
+        if user.get('ip_changed', False):
+            conditions += 1
+        if user.get('location_change',0) >= different_location:
+            conditions += 1
+        if user.get('weird_time', False):
+            conditions += 1
+        if conditions >= 2:
+            action = 'banned'
+            reason = 'conditional ban'
+
+    # Log user
+    c.execute("""INSERT INTO user_logs (username, password_hash, action_taken, reason, last_seen_lat, last_seen_lon, timestamp)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
+              (user['username'], user['password_hash'], action, reason, user['lat'], user['lon'], datetime.now().isoformat()))
+    # Update user status
+    c.execute("UPDATE users SET status=? WHERE username=?", (action, user['username']))
+    conn.commit()
+    conn.close()
+    return action
+
+# --- Routes ---
+@app.route('/')
+def dashboard():
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT username, status, last_seen_time, location_lat, location_lon FROM users")
+    users = c.fetchall()
+    conn.close()
+    return render_template('dashboard.html', users=users)
+
+@app.route('/add_user', methods=['POST'])
+def add_user():
+    data = request.form
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO users (username, password_hash, ip, location_lat, location_lon, wpm, last_seen_time, last_timezone) VALUES (?,?,?,?,?,?,?,?)",
+              (data['username'], data['password_hash'], data['ip'], float(data['lat']), float(data['lon']), float(data['wpm']), data['last_seen_time'], data['timezone']))
+    conn.commit()
+    conn.close()
+    return "User added!"
+
+if __name__ == '__main__':
+    init_db()
+    app.run(debug=True)
